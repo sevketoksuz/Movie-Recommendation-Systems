@@ -4,41 +4,74 @@ class UserDefinedNMF:
     
     def __init__(self, n_factors=15, n_epochs=30, 
                 reg_pu=0.12, reg_qi=0.12, learning_rate=0.01,
-                #,reg_bu=0.04, reg_bi=0.02, lr_bu=0.01, lr_bi=0.01 
+                beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8, 
                 user_id_map=None, item_id_map=None):
         self.n_factors = n_factors
         self.n_epochs = n_epochs 
-        self.reg_pu = reg_pu #used
-        self.reg_qi = reg_qi #used
-        self.learning_rate = 0.01
+        self.reg_pu = reg_pu
+        self.reg_qi = reg_qi
+        self.learning_rate = learning_rate
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
         self.user_id_map = user_id_map
         self.item_id_map = item_id_map
 
-        #self.reg_bu = reg_bu
-        #self.reg_bi = reg_bi 
-        #self.lr_bu = lr_bu
-        #self.lr_bi = lr_bi
+        self.user_factors = None
+        self.item_factors = None
+        self.m_u = None
+        self.v_u = None
+        self.m_i = None
+        self.v_i = None
+
     
     def init_factors(self, num_factors, size):
         return np.abs(np.random.normal(0, .1, (size, num_factors)))
     
+    def init_adam(self, n_users, n_items):
+        self.m_u = np.zeros((n_users, self.n_factors))
+        self.v_u = np.zeros((n_users, self.n_factors))
+        self.m_i = np.zeros((n_items, self.n_factors))
+        self.v_i = np.zeros((n_items, self.n_factors))
+
+    def update_with_adam(self, u, i, error, t):
+        grad_u = error * self.item_factors[i] - self.reg_pu * self.user_factors[u]
+        grad_i = error * self.user_factors[u] - self.reg_qi * self.item_factors[i]
+
+        self.m_u[u] = self.beta1 * self.m_u[u] + (1 - self.beta1) * grad_u
+        self.v_u[u] = self.beta2 * self.v_u[u] + (1 - self.beta2) * (grad_u**2)
+
+        self.m_i[i] = self.beta1 * self.m_i[i] + (1 - self.beta1) * grad_i
+        self.v_i[i] = self.beta2 * self.v_i[i] + (1 - self.beta2) * (grad_i**2)
+
+        m_hat_u = self.m_u[u] / (1 - self.beta1**t + self.epsilon)
+        v_hat_u = self.v_u[u] / (1 - self.beta2**t + self.epsilon)
+
+        m_hat_i = self.m_i[i] / (1 - self.beta1**t + self.epsilon)
+        v_hat_i = self.v_i[i] / (1 - self.beta2**t + self.epsilon)
+
+        self.user_factors[u] += self.learning_rate * m_hat_u / (np.sqrt(v_hat_u) + self.epsilon)
+        self.item_factors[i] += self.learning_rate * m_hat_i / (np.sqrt(v_hat_i) + self.epsilon)
+
     def fit(self, trainset):
         self.user_factors = self.init_factors(self.n_factors, trainset.n_users)
         self.item_factors = self.init_factors(self.n_factors, trainset.n_items)
+        self.init_adam(trainset.n_users, trainset.n_items)
 
-        for epoch in range(self.n_epochs):
+        for epoch in range(1, self.n_epochs+1):
             for u, i, r in trainset.all_ratings():
                 error = r - np.dot(self.user_factors[u], self.item_factors[i])
-                self.user_factors[u] += self.learning_rate * (error * self.item_factors[i] - self.reg_pu * self.user_factors[u])
-                self.item_factors[i] += self.learning_rate * (error * self.user_factors[u] - self.reg_qi * self.item_factors[i])
-                
+                self.update_with_adam(u, i, error, epoch)                
 
 
-            if epoch % 10 == 0 and epoch > 0:
+            if epoch % 10 == 0:
                 self.learning_rate *= 0.9
 
     def predict(self, u, i):
         est = np.dot(self.user_factors[u], self.item_factors[i]) 
+        
+        est = max(0.5, min(est, 5.0))
+
         return est
     
     def test(self, testset):
@@ -53,7 +86,7 @@ class UserDefinedNMF:
                     print(f"Skipping prediction for uid: {u} and iid: {i} - ID out of bounds")
                     continue
 
-                est = self.predict(u, i)
+                est = self.predict(u_mapped, i_mapped)
                 predictions.append((u, i, r, est))
             except Exception as e:
                 print(f"Error predicting for uid: {u} and iid: {i}: {e}")
