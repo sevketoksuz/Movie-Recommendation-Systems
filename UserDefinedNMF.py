@@ -67,13 +67,27 @@ class UserDefinedNMF:
             if epoch % 10 == 0:
                 self.learning_rate *= 0.9
 
-    def predict(self, u, i):
-        est = np.dot(self.user_factors[u], self.item_factors[i]) 
-        
-        est = max(0.5, min(est, 5.0))
+    def predict(self, u, i, blend_factor=0.80):
+        raw_est = np.dot(self.user_factors[u], self.item_factors[i])
+        activated_est = self.custom_activation(raw_est)
+        est = (blend_factor * raw_est) + ((1 - blend_factor) * activated_est)
 
+
+        est = max(min(est, 5.0), 0.5)
         return est
+
     
+    def custom_activation(self, x, min_val=0.5, max_val=5.0):
+        tanh_output = np.tanh(x)
+
+        scaled_tanh = (tanh_output + 1) / 2
+
+        scaled_x = scaled_tanh * (max_val - min_val) + min_val
+
+        return scaled_x
+
+
+
     def test(self, testset):
         predictions = []
 
@@ -91,3 +105,7 @@ class UserDefinedNMF:
             except Exception as e:
                 print(f"Error predicting for uid: {u} and iid: {i}: {e}")
         return predictions
+    
+
+
+    
