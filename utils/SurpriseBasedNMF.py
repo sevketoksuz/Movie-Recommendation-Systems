@@ -105,7 +105,3 @@ class UserDefinedNMF:
             except Exception as e:
                 print(f"Error predicting for uid: {u} and iid: {i}: {e}")
         return predictions
-    
-
-
-    
